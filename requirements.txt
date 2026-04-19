@@ -1,0 +1,8 @@
+flask
+flask-cors
+mediapipe
+opencv-python-headless
+scikit-learn
+numpy
+pandas
+gunicorn

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workout Pose Detector</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0a0a0a;
+      color: white;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px;
+    }
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 8px;
+      color: #00ff88;
+    }
+    p.subtitle {
+      color: #888;
+      margin-bottom: 24px;
+      font-size: 0.95rem;
+    }
+    .container {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+      max-width: 1100px;
+    }
+    .video-box {
+      position: relative;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 2px solid #222;
+    }
+    video {
+      display: block;
+      width: 640px;
+      max-width: 100%;
+      border-radius: 14px;
+    }
+    .stats {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 220px;
+    }
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 16px;
+      padding: 24px;
+      text-align: center;
+    }
+    .card .label {
+      font-size: 0.8rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    .card .value {
+      font-size: 2.5rem;
+      font-weight: bold;
+      color: #00ff88;
+    }
+    .card .value.exercise {
+      font-size: 1.4rem;
+      color: #7f77dd;
+      text-transform: capitalize;
+    }
+    .card .value.conf {
+      font-size: 1.8rem;
+      color: #ffaa00;
+    }
+    .buttons {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button {
+      padding: 14px 32px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    button:hover { opacity: 0.85; }
+    #startBtn {
+      background: #00ff88;
+      color: #000;
+    }
+    #resetBtn {
+      background: #333;
+      color: #fff;
+    }
+    .status {
+      margin-top: 16px;
+      font-size: 0.85rem;
+      color: #555;
+    }
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Workout Pose Detector</h1>
+  <p class="subtitle">AI-powered exercise detection using MediaPipe + Random Forest</p>
+
+  <div class="container">
+    <div class="video-box">
+      <video id="video" autoplay playsinline width="640" height="480"></video>
+      <canvas id="canvas" width="640" height="480"></canvas>
+    </div>
+
+    <div class="stats">
+      <div class="card">
+        <div class="label">Exercise</div>
+        <div class="value exercise" id="exercise">Waiting...</div>
+      </div>
+      <div class="card">
+        <div class="label">Reps</div>
+        <div class="value" id="reps">0</div>
+      </div>
+      <div class="card">
+        <div class="label">Stage</div>
+        <div class="value exercise" id="stage">-</div>
+      </div>
+      <div class="card">
+        <div class="label">Confidence</div>
+        <div class="value conf" id="confidence">0%</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="buttons">
+    <button id="startBtn" onclick="toggleDetection()">Start Detection</button>
+    <button id="resetBtn" onclick="resetReps()">Reset Reps</button>
+  </div>
+  <div class="status" id="status">Click Start Detection to begin</div>
+
+  <script>
+    // !! REPLACE THIS with your Render URL after deploying !!
+    const API_URL = 'https://YOUR-APP-NAME.onrender.com';
+
+    let running  = false;
+    let interval = null;
+
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        document.getElementById('video').srcObject = stream;
+      })
+      .catch(() => {
+        document.getElementById('status').textContent =
+          'Camera access denied. Please allow camera.';
+      });
+
+    function toggleDetection() {
+      running = !running;
+      const btn = document.getElementById('startBtn');
+      btn.textContent = running ? 'Stop Detection' : 'Start Detection';
+      btn.style.background = running ? '#ff4444' : '#00ff88';
+      btn.style.color = running ? '#fff' : '#000';
+
+      if (running) {
+        document.getElementById('status').textContent = 'Detecting...';
+        interval = setInterval(sendFrame, 600);
+      } else {
+        clearInterval(interval);
+        document.getElementById('status').textContent =
+          'Stopped. Click Start to resume.';
+        document.getElementById('exercise').textContent = 'Waiting...';
+      }
+    }
+
+    function sendFrame() {
+      const video  = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      const ctx    = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, 640, 480);
+      const imageData = canvas.toDataURL('image/jpeg', 0.7);
+
+      fetch(`${API_URL}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageData })
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) return;
+        document.getElementById('exercise').textContent =
+          data.exercise.replace('_', ' ');
+        document.getElementById('reps').textContent =
+          data.reps;
+        document.getElementById('stage').textContent =
+          data.stage || '-';
+        document.getElementById('confidence').textContent =
+          (data.confidence * 100).toFixed(0) + '%';
+      })
+      .catch(() => {
+        document.getElementById('status').textContent =
+          'API connection error. Check Render deployment.';
+      });
+    }
+
+    function resetReps() {
+      fetch(`${API_URL}/reset`, { method: 'POST' })
+        .then(() => {
+          document.getElementById('reps').textContent = '0';
+          document.getElementById('stage').textContent = '-';
+        });
+    }
+  </script>
+</body>
+</html>
