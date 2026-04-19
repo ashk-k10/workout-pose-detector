@@ -1,6 +1,6 @@
 flask
 flask-cors
-mediapipe
+mediapipe==0.10.9
 opencv-python-headless
 scikit-learn
 numpy
