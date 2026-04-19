@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import mediapipe as mp
 import numpy as np
 import pickle
 import cv2
@@ -12,10 +11,11 @@ CORS(app)
 with open('workout_classifier.pkl', 'rb') as f:
     model = pickle.load(f)
 
-mp_pose = mp.solutions.pose
-pose    = mp_pose.Pose(
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
+import mediapipe as mp
+mp_pose    = mp.solutions.pose
+pose       = mp_pose.Pose(
+    static_image_mode=True,
+    min_detection_confidence=0.5
 )
 
 def calculate_angle(a, b, c):
