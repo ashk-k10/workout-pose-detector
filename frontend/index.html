@@ -16,79 +16,27 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
   <script>
-    const API_URL = 'https://Amishak28-workout-pose-api.hf.space';
+  const API_URL = 'https://Amishak28-workout-pose-api.hf.space';
 
-    let running  = false;
-    let interval = null;
+  let running = false;
+  let interval = null;
+  let reps = 0;
+  let stage = null;
+  let currentExercise = 'unknown';
+  let lastLandmarks = null;
 
-    // ── REP COUNTING STATE ────────────────────────────────────
-    let reps  = 0;
-    let stage = null;   // "up" or "down"
-    let currentExercise = 'unknown';
-    let lastLandmarks   = null;
+  // ── All DOM-dependent code moved inside DOMContentLoaded ──
+  let videoEl, skeletonCanvas, captureCanvas, skCtx, capCtx;
 
-    const videoEl        = document.getElementById('video');
-    const skeletonCanvas = document.getElementById('skeleton-canvas');
-    const captureCanvas  = document.getElementById('capture-canvas');
-    const skCtx          = skeletonCanvas.getContext('2d');
-    const capCtx         = captureCanvas.getContext('2d');
+  document.addEventListener('DOMContentLoaded', () => {
+    videoEl        = document.getElementById('video');
+    skeletonCanvas = document.getElementById('skeleton-canvas');
+    captureCanvas  = document.getElementById('capture-canvas');
+    skCtx          = skeletonCanvas.getContext('2d');
+    capCtx         = captureCanvas.getContext('2d');
 
-    // ── ANGLE HELPER ──────────────────────────────────────────
-    function calcAngle(a, b, c) {
-      const radians = Math.atan2(c.y - b.y, c.x - b.x)
-                    - Math.atan2(a.y - b.y, a.x - b.x);
-      let angle = Math.abs(radians * 180 / Math.PI);
-      if (angle > 180) angle = 360 - angle;
-      return angle;
-    }
-
-    // ── COUNT REPS FROM LANDMARKS ─────────────────────────────
-    // Works for curls, squats, push-ups by picking the right joints
-    function countRep(landmarks) {
-      if (!landmarks) return;
-
-      let angle = null;
-
-      if (currentExercise.includes('curl') || currentExercise.includes('bicep')) {
-        // Right arm: shoulder(12) → elbow(14) → wrist(16)
-        angle = calcAngle(landmarks[12], landmarks[14], landmarks[16]);
-
-      } else if (currentExercise.includes('squat')) {
-        // Right leg: hip(24) → knee(26) → ankle(28)
-        angle = calcAngle(landmarks[24], landmarks[26], landmarks[28]);
-
-      } else if (currentExercise.includes('push')) {
-        // Right arm: shoulder(12) → elbow(14) → wrist(16)
-        angle = calcAngle(landmarks[12], landmarks[14], landmarks[16]);
-
-      } else if (currentExercise.includes('shoulder') || currentExercise.includes('press')) {
-        // Right arm: elbow(14) → shoulder(12) → hip(24)
-        angle = calcAngle(landmarks[14], landmarks[12], landmarks[24]);
-
-      } else {
-        // Fallback: right elbow angle works for most exercises
-        angle = calcAngle(landmarks[12], landmarks[14], landmarks[16]);
-      }
-
-      // ── Two-threshold state machine ───────────────────────
-      // "down" = contracted / bottom of movement
-      // "up"   = extended / top of movement  
-      if (angle < 90 && stage !== 'down') {
-        stage = 'down';
-        document.getElementById('stage').textContent = 'down';
-      }
-      if (angle > 160 && stage === 'down') {
-        stage = 'up';
-        reps++;
-        document.getElementById('stage').textContent = 'up';
-        document.getElementById('reps').textContent  = reps;
-      }
-    }
-
-    // ── MEDIAPIPE POSE SETUP ──────────────────────────────────
     const pose = new Pose({
-      locateFile: (file) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
     });
 
     pose.setOptions({
@@ -101,14 +49,13 @@
 
     pose.onResults((results) => {
       skCtx.clearRect(0, 0, 640, 480);
-
       if (results.poseLandmarks) {
         drawConnectors(skCtx, results.poseLandmarks, POSE_CONNECTIONS,
           { color: '#00FF00', lineWidth: 2 });
         drawLandmarks(skCtx, results.poseLandmarks,
           { color: '#00FF00', fillColor: '#FFFFFF', lineWidth: 1, radius: 4 });
 
-        const keyJoints  = [11,12,13,14,15,16,23,24,25,26,27,28];
+        const keyJoints = [11,12,13,14,15,16,23,24,25,26,27,28];
         const jointColors = {
           11:'#4488ff',12:'#4488ff',13:'#ffff00',14:'#ffff00',
           15:'#ffff00',16:'#ffff00',23:'#4488ff',24:'#4488ff',
@@ -125,78 +72,111 @@
           skCtx.stroke();
         });
 
-        // ── Count rep on every frame while running ──────────
         lastLandmarks = results.poseLandmarks;
         if (running) countRep(results.poseLandmarks);
       }
     });
 
-    // ── CAMERA SETUP ──────────────────────────────────────────
     const camera = new Camera(videoEl, {
       onFrame: async () => { await pose.send({ image: videoEl }); },
       width: 640, height: 480,
     });
 
     camera.start().then(() => {
-      document.getElementById('status').textContent =
-        'Camera ready. Click Start Detection.';
+      document.getElementById('status').textContent = 'Camera ready. Click Start Detection.';
     });
+  });
 
-    // ── DETECTION TOGGLE ──────────────────────────────────────
-    function toggleDetection() {
-      running = !running;
-      const btn = document.getElementById('startBtn');
-      btn.textContent      = running ? 'Stop Detection' : 'Start Detection';
-      btn.style.background = running ? '#ff4444' : '#00ff88';
-      btn.style.color      = running ? '#fff'    : '#000';
+  // ── ANGLE HELPER ──────────────────────────────────────────
+  function calcAngle(a, b, c) {
+    const radians = Math.atan2(c.y - b.y, c.x - b.x)
+                  - Math.atan2(a.y - b.y, a.x - b.x);
+    let angle = Math.abs(radians * 180 / Math.PI);
+    if (angle > 180) angle = 360 - angle;
+    return angle;
+  }
 
-      if (running) {
-        document.getElementById('status').textContent = 'Detecting...';
-        // API called slowly just to classify exercise — NOT to count reps
-        interval = setInterval(sendFrameForClassification, 2000);
-      } else {
-        clearInterval(interval);
-        document.getElementById('status').textContent = 'Stopped.';
-        document.getElementById('exercise').textContent = 'Waiting...';
+  // ── COUNT REPS ────────────────────────────────────────────
+  function countRep(landmarks) {
+    if (!landmarks) return;
+    let angle = null;
+
+    if (currentExercise.includes('curl') || currentExercise.includes('bicep')) {
+      angle = calcAngle(landmarks[12], landmarks[14], landmarks[16]);
+    } else if (currentExercise.includes('squat')) {
+      angle = calcAngle(landmarks[24], landmarks[26], landmarks[28]);
+    } else if (currentExercise.includes('push')) {
+      angle = calcAngle(landmarks[12], landmarks[14], landmarks[16]);
+    } else if (currentExercise.includes('shoulder') || currentExercise.includes('press')) {
+      angle = calcAngle(landmarks[14], landmarks[12], landmarks[24]);
+    } else {
+      angle = calcAngle(landmarks[12], landmarks[14], landmarks[16]);
+    }
+
+    if (angle < 90 && stage !== 'down') {
+      stage = 'down';
+      document.getElementById('stage').textContent = 'down';
+    }
+    if (angle > 160 && stage === 'down') {
+      stage = 'up';
+      reps++;
+      document.getElementById('stage').textContent = 'up';
+      document.getElementById('reps').textContent  = reps;
+    }
+  }
+
+  // ── DETECTION TOGGLE ──────────────────────────────────────
+  function toggleDetection() {
+    running = !running;
+    const btn = document.getElementById('startBtn');
+    btn.textContent      = running ? 'Stop Detection' : 'Start Detection';
+    btn.style.background = running ? '#ff4444' : '#00ff88';
+    btn.style.color      = running ? '#fff'    : '#000';
+
+    if (running) {
+      document.getElementById('status').textContent = 'Detecting...';
+      interval = setInterval(sendFrameForClassification, 2000);
+    } else {
+      clearInterval(interval);
+      document.getElementById('status').textContent = 'Stopped.';
+      document.getElementById('exercise').textContent = 'Waiting...';
+    }
+  }
+
+  // ── CLASSIFICATION API CALL ───────────────────────────────
+  function sendFrameForClassification() {
+    capCtx.drawImage(videoEl, 0, 0, 640, 480);
+    const imageData = captureCanvas.toDataURL('image/jpeg', 0.7);
+
+    fetch(`${API_URL}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageData })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) return;
+      const newExercise = data.exercise.replace('_', ' ');
+      if (newExercise !== currentExercise) {
+        currentExercise = newExercise;
+        stage = null;
       }
-    }
+      document.getElementById('exercise').textContent   = newExercise;
+      document.getElementById('confidence').textContent = (data.confidence * 100).toFixed(0) + '%';
+    })
+    .catch(() => {
+      document.getElementById('status').textContent = 'API error (classification only).';
+    });
+  }
 
-    // ── SEND FRAME FOR EXERCISE CLASSIFICATION ONLY ───────────
-    function sendFrameForClassification() {
-      capCtx.drawImage(videoEl, 0, 0, 640, 480);
-      const imageData = captureCanvas.toDataURL('image/jpeg', 0.7);
-
-      fetch(`${API_URL}/predict`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData })
-      })
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) return;
-        const newExercise = data.exercise.replace('_', ' ');
-        // Only reset stage if exercise type changes
-        if (newExercise !== currentExercise) {
-          currentExercise = newExercise;
-          stage = null;  // reset so counting starts fresh
-        }
-        document.getElementById('exercise').textContent   = newExercise;
-        document.getElementById('confidence').textContent =
-          (data.confidence * 100).toFixed(0) + '%';
-      })
-      .catch(() => {
-        document.getElementById('status').textContent = 'API error (classification only).';
-      });
-    }
-
-    // ── RESET REPS ────────────────────────────────────────────
-    function resetReps() {
-      reps  = 0;
-      stage = null;
-      document.getElementById('reps').textContent  = '0';
-      document.getElementById('stage').textContent = '-';
-      fetch(`${API_URL}/reset`, { method: 'POST' }).catch(() => {});
-    }
-  </script>
+  // ── RESET REPS ────────────────────────────────────────────
+  function resetReps() {
+    reps  = 0;
+    stage = null;
+    document.getElementById('reps').textContent  = '0';
+    document.getElementById('stage').textContent = '-';
+    fetch(`${API_URL}/reset`, { method: 'POST' }).catch(() => {});
+  }
+</script>
 </body>
 </html>
