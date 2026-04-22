@@ -5,147 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Workout Pose Detector</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #0a0a0a;
-      color: white;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 24px;
-    }
-    h1 { font-size: 2rem; margin-bottom: 4px; color: #00ff88; }
-    p.subtitle { color: #888; margin-bottom: 20px; font-size: 0.9rem; }
-    .container {
-      display: flex;
-      gap: 24px;
-      flex-wrap: wrap;
-      justify-content: center;
-      width: 100%;
-      max-width: 1100px;
-    }
-    .video-box {
-      position: relative;
-      border-radius: 16px;
-      overflow: hidden;
-      border: 2px solid #222;
-      width: 640px;
-    }
-    video {
-      display: block;
-      width: 640px;
-      height: 480px;
-      border-radius: 14px;
-      object-fit: cover;
-    }
-    /* Canvas sits exactly on top of video */
-    #skeleton-canvas {
-      position: absolute;
-      top: 0; left: 0;
-      width: 640px;
-      height: 480px;
-      border-radius: 14px;
-      pointer-events: none;
-    }
-    .stats {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      min-width: 220px;
-    }
-    .card {
-      background: #1a1a1a;
-      border: 1px solid #2a2a2a;
-      border-radius: 16px;
-      padding: 20px;
-      text-align: center;
-    }
-    .card .label {
-      font-size: 0.75rem;
-      color: #666;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 6px;
-    }
-    .card .value {
-      font-size: 2.2rem;
-      font-weight: bold;
-      color: #00ff88;
-    }
-    .card .value.exercise {
-      font-size: 1.3rem;
-      color: #7f77dd;
-      text-transform: capitalize;
-    }
-    .card .value.conf { color: #ffaa00; }
-    .buttons {
-      display: flex;
-      gap: 12px;
-      margin-top: 20px;
-      flex-wrap: wrap;
-      justify-content: center;
-    }
-    button {
-      padding: 12px 28px;
-      font-size: 1rem;
-      border: none;
-      border-radius: 10px;
-      cursor: pointer;
-      font-weight: 600;
-      transition: opacity 0.2s;
-    }
-    button:hover { opacity: 0.85; }
-    #startBtn { background: #00ff88; color: #000; }
-    #resetBtn { background: #333; color: #fff; }
-    .status { margin-top: 12px; font-size: 0.8rem; color: #555; }
-    #capture-canvas { display: none; }
+    /* ... keep all your existing styles exactly as they are ... */
   </style>
 </head>
 <body>
-  <h1>Workout Pose Detector</h1>
-  <p class="subtitle">AI-powered exercise detection using MediaPipe + Random Forest</p>
+  <!-- ... keep all your existing HTML exactly as it is ... -->
 
-  <div class="container">
-    <div class="video-box">
-      <video id="video" autoplay playsinline width="640" height="480"></video>
-      <!-- Skeleton drawn here on top of video -->
-      <canvas id="skeleton-canvas" width="640" height="480"></canvas>
-    </div>
-
-    <div class="stats">
-      <div class="card">
-        <div class="label">Exercise</div>
-        <div class="value exercise" id="exercise">Waiting...</div>
-      </div>
-      <div class="card">
-        <div class="label">Reps</div>
-        <div class="value" id="reps">0</div>
-      </div>
-      <div class="card">
-        <div class="label">Stage</div>
-        <div class="value exercise" id="stage">-</div>
-      </div>
-      <div class="card">
-        <div class="label">Confidence</div>
-        <div class="value conf" id="confidence">0%</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="buttons">
-    <button id="startBtn" onclick="toggleDetection()">Start Detection</button>
-    <button id="resetBtn" onclick="resetReps()">Reset Reps</button>
-  </div>
-  <div class="status" id="status">Click Start Detection to begin</div>
-
-  <!-- Hidden canvas for capturing frames to send to API -->
-  <canvas id="capture-canvas" width="640" height="480"></canvas>
-
-  <!-- MediaPipe from CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
@@ -155,11 +21,69 @@
     let running  = false;
     let interval = null;
 
-    const videoEl    = document.getElementById('video');
+    // ── REP COUNTING STATE ────────────────────────────────────
+    let reps  = 0;
+    let stage = null;   // "up" or "down"
+    let currentExercise = 'unknown';
+    let lastLandmarks   = null;
+
+    const videoEl        = document.getElementById('video');
     const skeletonCanvas = document.getElementById('skeleton-canvas');
     const captureCanvas  = document.getElementById('capture-canvas');
-    const skCtx      = skeletonCanvas.getContext('2d');
-    const capCtx     = captureCanvas.getContext('2d');
+    const skCtx          = skeletonCanvas.getContext('2d');
+    const capCtx         = captureCanvas.getContext('2d');
+
+    // ── ANGLE HELPER ──────────────────────────────────────────
+    function calcAngle(a, b, c) {
+      const radians = Math.atan2(c.y - b.y, c.x - b.x)
+                    - Math.atan2(a.y - b.y, a.x - b.x);
+      let angle = Math.abs(radians * 180 / Math.PI);
+      if (angle > 180) angle = 360 - angle;
+      return angle;
+    }
+
+    // ── COUNT REPS FROM LANDMARKS ─────────────────────────────
+    // Works for curls, squats, push-ups by picking the right joints
+    function countRep(landmarks) {
+      if (!landmarks) return;
+
+      let angle = null;
+
+      if (currentExercise.includes('curl') || currentExercise.includes('bicep')) {
+        // Right arm: shoulder(12) → elbow(14) → wrist(16)
+        angle = calcAngle(landmarks[12], landmarks[14], landmarks[16]);
+
+      } else if (currentExercise.includes('squat')) {
+        // Right leg: hip(24) → knee(26) → ankle(28)
+        angle = calcAngle(landmarks[24], landmarks[26], landmarks[28]);
+
+      } else if (currentExercise.includes('push')) {
+        // Right arm: shoulder(12) → elbow(14) → wrist(16)
+        angle = calcAngle(landmarks[12], landmarks[14], landmarks[16]);
+
+      } else if (currentExercise.includes('shoulder') || currentExercise.includes('press')) {
+        // Right arm: elbow(14) → shoulder(12) → hip(24)
+        angle = calcAngle(landmarks[14], landmarks[12], landmarks[24]);
+
+      } else {
+        // Fallback: right elbow angle works for most exercises
+        angle = calcAngle(landmarks[12], landmarks[14], landmarks[16]);
+      }
+
+      // ── Two-threshold state machine ───────────────────────
+      // "down" = contracted / bottom of movement
+      // "up"   = extended / top of movement  
+      if (angle < 90 && stage !== 'down') {
+        stage = 'down';
+        document.getElementById('stage').textContent = 'down';
+      }
+      if (angle > 160 && stage === 'down') {
+        stage = 'up';
+        reps++;
+        document.getElementById('stage').textContent = 'up';
+        document.getElementById('reps').textContent  = reps;
+      }
+    }
 
     // ── MEDIAPIPE POSE SETUP ──────────────────────────────────
     const pose = new Pose({
@@ -175,73 +99,42 @@
       minTrackingConfidence: 0.5,
     });
 
-    // This runs every time MediaPipe processes a frame
     pose.onResults((results) => {
-      // Clear skeleton canvas
       skCtx.clearRect(0, 0, 640, 480);
 
       if (results.poseLandmarks) {
-        // ── Draw connections (bones) ──
-        drawConnectors(
-          skCtx,
-          results.poseLandmarks,
-          POSE_CONNECTIONS,
-          { color: '#00FF00', lineWidth: 2 }
-        );
+        drawConnectors(skCtx, results.poseLandmarks, POSE_CONNECTIONS,
+          { color: '#00FF00', lineWidth: 2 });
+        drawLandmarks(skCtx, results.poseLandmarks,
+          { color: '#00FF00', fillColor: '#FFFFFF', lineWidth: 1, radius: 4 });
 
-        // ── Draw landmark dots (joints) ──
-        drawLandmarks(
-          skCtx,
-          results.poseLandmarks,
-          {
-            color: '#00FF00',
-            fillColor: '#FFFFFF',
-            lineWidth: 1,
-            radius: 4
-          }
-        );
-
-        // ── Highlight key joints in different colors ──
-        const keyJoints = [
-          11, 12,  // shoulders — blue
-          13, 14,  // elbows — yellow
-          15, 16,  // wrists — yellow
-          23, 24,  // hips — blue
-          25, 26,  // knees — red
-          27, 28   // ankles — red
-        ];
-
+        const keyJoints  = [11,12,13,14,15,16,23,24,25,26,27,28];
         const jointColors = {
-          11: '#4488ff', 12: '#4488ff',
-          13: '#ffff00', 14: '#ffff00',
-          15: '#ffff00', 16: '#ffff00',
-          23: '#4488ff', 24: '#4488ff',
-          25: '#ff4444', 26: '#ff4444',
-          27: '#ff4444', 28: '#ff4444',
+          11:'#4488ff',12:'#4488ff',13:'#ffff00',14:'#ffff00',
+          15:'#ffff00',16:'#ffff00',23:'#4488ff',24:'#4488ff',
+          25:'#ff4444',26:'#ff4444',27:'#ff4444',28:'#ff4444',
         };
-
         keyJoints.forEach(i => {
           const lm = results.poseLandmarks[i];
-          const x  = lm.x * 640;
-          const y  = lm.y * 480;
           skCtx.beginPath();
-          skCtx.arc(x, y, 6, 0, 2 * Math.PI);
+          skCtx.arc(lm.x * 640, lm.y * 480, 6, 0, 2 * Math.PI);
           skCtx.fillStyle   = jointColors[i];
           skCtx.strokeStyle = '#ffffff';
           skCtx.lineWidth   = 2;
           skCtx.fill();
           skCtx.stroke();
         });
+
+        // ── Count rep on every frame while running ──────────
+        lastLandmarks = results.poseLandmarks;
+        if (running) countRep(results.poseLandmarks);
       }
     });
 
     // ── CAMERA SETUP ──────────────────────────────────────────
     const camera = new Camera(videoEl, {
-      onFrame: async () => {
-        await pose.send({ image: videoEl });
-      },
-      width: 640,
-      height: 480,
+      onFrame: async () => { await pose.send({ image: videoEl }); },
+      width: 640, height: 480,
     });
 
     camera.start().then(() => {
@@ -253,23 +146,23 @@
     function toggleDetection() {
       running = !running;
       const btn = document.getElementById('startBtn');
-      btn.textContent    = running ? 'Stop Detection' : 'Start Detection';
+      btn.textContent      = running ? 'Stop Detection' : 'Start Detection';
       btn.style.background = running ? '#ff4444' : '#00ff88';
       btn.style.color      = running ? '#fff'    : '#000';
 
       if (running) {
         document.getElementById('status').textContent = 'Detecting...';
-        interval = setInterval(sendFrame, 600);
+        // API called slowly just to classify exercise — NOT to count reps
+        interval = setInterval(sendFrameForClassification, 2000);
       } else {
         clearInterval(interval);
-        document.getElementById('status').textContent =
-          'Stopped. Click Start to resume.';
+        document.getElementById('status').textContent = 'Stopped.';
         document.getElementById('exercise').textContent = 'Waiting...';
       }
     }
 
-    // ── SEND FRAME TO API ─────────────────────────────────────
-    function sendFrame() {
+    // ── SEND FRAME FOR EXERCISE CLASSIFICATION ONLY ───────────
+    function sendFrameForClassification() {
       capCtx.drawImage(videoEl, 0, 0, 640, 480);
       const imageData = captureCanvas.toDataURL('image/jpeg', 0.7);
 
@@ -281,26 +174,28 @@
       .then(r => r.json())
       .then(data => {
         if (data.error) return;
-        document.getElementById('exercise').textContent =
-          data.exercise.replace('_', ' ');
-        document.getElementById('reps').textContent        = data.reps;
-        document.getElementById('stage').textContent       = data.stage || '-';
-        document.getElementById('confidence').textContent  =
+        const newExercise = data.exercise.replace('_', ' ');
+        // Only reset stage if exercise type changes
+        if (newExercise !== currentExercise) {
+          currentExercise = newExercise;
+          stage = null;  // reset so counting starts fresh
+        }
+        document.getElementById('exercise').textContent   = newExercise;
+        document.getElementById('confidence').textContent =
           (data.confidence * 100).toFixed(0) + '%';
       })
       .catch(() => {
-        document.getElementById('status').textContent =
-          'API connection error.';
+        document.getElementById('status').textContent = 'API error (classification only).';
       });
     }
 
     // ── RESET REPS ────────────────────────────────────────────
     function resetReps() {
-      fetch(`${API_URL}/reset`, { method: 'POST' })
-        .then(() => {
-          document.getElementById('reps').textContent  = '0';
-          document.getElementById('stage').textContent = '-';
-        });
+      reps  = 0;
+      stage = null;
+      document.getElementById('reps').textContent  = '0';
+      document.getElementById('stage').textContent = '-';
+      fetch(`${API_URL}/reset`, { method: 'POST' }).catch(() => {});
     }
   </script>
 </body>
