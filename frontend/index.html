@@ -16,16 +16,8 @@
       align-items: center;
       padding: 24px;
     }
-    h1 {
-      font-size: 2rem;
-      margin-bottom: 8px;
-      color: #00ff88;
-    }
-    p.subtitle {
-      color: #888;
-      margin-bottom: 24px;
-      font-size: 0.95rem;
-    }
+    h1 { font-size: 2rem; margin-bottom: 4px; color: #00ff88; }
+    p.subtitle { color: #888; margin-bottom: 20px; font-size: 0.9rem; }
     .container {
       display: flex;
       gap: 24px;
@@ -39,12 +31,23 @@
       border-radius: 16px;
       overflow: hidden;
       border: 2px solid #222;
+      width: 640px;
     }
     video {
       display: block;
       width: 640px;
-      max-width: 100%;
+      height: 480px;
       border-radius: 14px;
+      object-fit: cover;
+    }
+    /* Canvas sits exactly on top of video */
+    #skeleton-canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 640px;
+      height: 480px;
+      border-radius: 14px;
+      pointer-events: none;
     }
     .stats {
       display: flex;
@@ -56,39 +59,36 @@
       background: #1a1a1a;
       border: 1px solid #2a2a2a;
       border-radius: 16px;
-      padding: 24px;
+      padding: 20px;
       text-align: center;
     }
     .card .label {
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       color: #666;
       text-transform: uppercase;
       letter-spacing: 1px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     .card .value {
-      font-size: 2.5rem;
+      font-size: 2.2rem;
       font-weight: bold;
       color: #00ff88;
     }
     .card .value.exercise {
-      font-size: 1.4rem;
+      font-size: 1.3rem;
       color: #7f77dd;
       text-transform: capitalize;
     }
-    .card .value.conf {
-      font-size: 1.8rem;
-      color: #ffaa00;
-    }
+    .card .value.conf { color: #ffaa00; }
     .buttons {
       display: flex;
       gap: 12px;
-      margin-top: 24px;
+      margin-top: 20px;
       flex-wrap: wrap;
       justify-content: center;
     }
     button {
-      padding: 14px 32px;
+      padding: 12px 28px;
       font-size: 1rem;
       border: none;
       border-radius: 10px;
@@ -97,20 +97,10 @@
       transition: opacity 0.2s;
     }
     button:hover { opacity: 0.85; }
-    #startBtn {
-      background: #00ff88;
-      color: #000;
-    }
-    #resetBtn {
-      background: #333;
-      color: #fff;
-    }
-    .status {
-      margin-top: 16px;
-      font-size: 0.85rem;
-      color: #555;
-    }
-    canvas { display: none; }
+    #startBtn { background: #00ff88; color: #000; }
+    #resetBtn { background: #333; color: #fff; }
+    .status { margin-top: 12px; font-size: 0.8rem; color: #555; }
+    #capture-canvas { display: none; }
   </style>
 </head>
 <body>
@@ -120,7 +110,8 @@
   <div class="container">
     <div class="video-box">
       <video id="video" autoplay playsinline width="640" height="480"></video>
-      <canvas id="canvas" width="640" height="480"></canvas>
+      <!-- Skeleton drawn here on top of video -->
+      <canvas id="skeleton-canvas" width="640" height="480"></canvas>
     </div>
 
     <div class="stats">
@@ -149,28 +140,122 @@
   </div>
   <div class="status" id="status">Click Start Detection to begin</div>
 
+  <!-- Hidden canvas for capturing frames to send to API -->
+  <canvas id="capture-canvas" width="640" height="480"></canvas>
+
+  <!-- MediaPipe from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+
   <script>
-    // !! REPLACE THIS with your Render URL after deploying !!
     const API_URL = 'https://Amishak28-workout-pose-api.hf.space';
 
     let running  = false;
     let interval = null;
 
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => {
-        document.getElementById('video').srcObject = stream;
-      })
-      .catch(() => {
-        document.getElementById('status').textContent =
-          'Camera access denied. Please allow camera.';
-      });
+    const videoEl    = document.getElementById('video');
+    const skeletonCanvas = document.getElementById('skeleton-canvas');
+    const captureCanvas  = document.getElementById('capture-canvas');
+    const skCtx      = skeletonCanvas.getContext('2d');
+    const capCtx     = captureCanvas.getContext('2d');
 
+    // ── MEDIAPIPE POSE SETUP ──────────────────────────────────
+    const pose = new Pose({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+
+    // This runs every time MediaPipe processes a frame
+    pose.onResults((results) => {
+      // Clear skeleton canvas
+      skCtx.clearRect(0, 0, 640, 480);
+
+      if (results.poseLandmarks) {
+        // ── Draw connections (bones) ──
+        drawConnectors(
+          skCtx,
+          results.poseLandmarks,
+          POSE_CONNECTIONS,
+          { color: '#00FF00', lineWidth: 2 }
+        );
+
+        // ── Draw landmark dots (joints) ──
+        drawLandmarks(
+          skCtx,
+          results.poseLandmarks,
+          {
+            color: '#00FF00',
+            fillColor: '#FFFFFF',
+            lineWidth: 1,
+            radius: 4
+          }
+        );
+
+        // ── Highlight key joints in different colors ──
+        const keyJoints = [
+          11, 12,  // shoulders — blue
+          13, 14,  // elbows — yellow
+          15, 16,  // wrists — yellow
+          23, 24,  // hips — blue
+          25, 26,  // knees — red
+          27, 28   // ankles — red
+        ];
+
+        const jointColors = {
+          11: '#4488ff', 12: '#4488ff',
+          13: '#ffff00', 14: '#ffff00',
+          15: '#ffff00', 16: '#ffff00',
+          23: '#4488ff', 24: '#4488ff',
+          25: '#ff4444', 26: '#ff4444',
+          27: '#ff4444', 28: '#ff4444',
+        };
+
+        keyJoints.forEach(i => {
+          const lm = results.poseLandmarks[i];
+          const x  = lm.x * 640;
+          const y  = lm.y * 480;
+          skCtx.beginPath();
+          skCtx.arc(x, y, 6, 0, 2 * Math.PI);
+          skCtx.fillStyle   = jointColors[i];
+          skCtx.strokeStyle = '#ffffff';
+          skCtx.lineWidth   = 2;
+          skCtx.fill();
+          skCtx.stroke();
+        });
+      }
+    });
+
+    // ── CAMERA SETUP ──────────────────────────────────────────
+    const camera = new Camera(videoEl, {
+      onFrame: async () => {
+        await pose.send({ image: videoEl });
+      },
+      width: 640,
+      height: 480,
+    });
+
+    camera.start().then(() => {
+      document.getElementById('status').textContent =
+        'Camera ready. Click Start Detection.';
+    });
+
+    // ── DETECTION TOGGLE ──────────────────────────────────────
     function toggleDetection() {
       running = !running;
       const btn = document.getElementById('startBtn');
-      btn.textContent = running ? 'Stop Detection' : 'Start Detection';
+      btn.textContent    = running ? 'Stop Detection' : 'Start Detection';
       btn.style.background = running ? '#ff4444' : '#00ff88';
-      btn.style.color = running ? '#fff' : '#000';
+      btn.style.color      = running ? '#fff'    : '#000';
 
       if (running) {
         document.getElementById('status').textContent = 'Detecting...';
@@ -183,12 +268,10 @@
       }
     }
 
+    // ── SEND FRAME TO API ─────────────────────────────────────
     function sendFrame() {
-      const video  = document.getElementById('video');
-      const canvas = document.getElementById('canvas');
-      const ctx    = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, 640, 480);
-      const imageData = canvas.toDataURL('image/jpeg', 0.7);
+      capCtx.drawImage(videoEl, 0, 0, 640, 480);
+      const imageData = captureCanvas.toDataURL('image/jpeg', 0.7);
 
       fetch(`${API_URL}/predict`, {
         method: 'POST',
@@ -200,23 +283,22 @@
         if (data.error) return;
         document.getElementById('exercise').textContent =
           data.exercise.replace('_', ' ');
-        document.getElementById('reps').textContent =
-          data.reps;
-        document.getElementById('stage').textContent =
-          data.stage || '-';
-        document.getElementById('confidence').textContent =
+        document.getElementById('reps').textContent        = data.reps;
+        document.getElementById('stage').textContent       = data.stage || '-';
+        document.getElementById('confidence').textContent  =
           (data.confidence * 100).toFixed(0) + '%';
       })
       .catch(() => {
         document.getElementById('status').textContent =
-          'API connection error. Check Render deployment.';
+          'API connection error.';
       });
     }
 
+    // ── RESET REPS ────────────────────────────────────────────
     function resetReps() {
       fetch(`${API_URL}/reset`, { method: 'POST' })
         .then(() => {
-          document.getElementById('reps').textContent = '0';
+          document.getElementById('reps').textContent  = '0';
           document.getElementById('stage').textContent = '-';
         });
     }
